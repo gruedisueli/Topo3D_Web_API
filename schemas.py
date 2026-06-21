@@ -15,9 +15,9 @@ class Force(BaseModel):
 
 class OptimizationParams(BaseModel):
     model_config = {"extra":"forbid"}
-    nelx: int = Field(..., ge=5, le=256)
-    nely: int = Field(..., ge=5, le=256)
-    nelz: int = Field(..., ge=5, le=256)
+    nelx: int = Field(..., ge=5)
+    nely: int = Field(..., ge=5)
+    nelz: int = Field(..., ge=5)
     volfrac: float = Field(..., ge=0.0, le=1.0)
     penal: float = Field(..., ge=1.0, le=5.0)
     rmin: float = Field(..., ge=0.5, le=10.0)
