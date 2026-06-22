@@ -1,8 +1,7 @@
 import sys
 sys.path.insert(0, "../PyTopo3D_callbacks")
 from run_opt import run_optimization_api
-from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, status, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 import queue
@@ -23,26 +22,23 @@ import shutil
 
 # Define the origins you want to allow (e.g., your frontend URL)
 ALLOWED_WEBSOCKET_ORIGINS = [
-    "http://localhost:5173",   # Your local dev environment
-    "https://yourusername.github.io" # Your production GitHub Pages URL
+    #"http://localhost:5173",   # Your local dev environment
+    "https://gruedisueli.github.io/Topo3D_Web_Frontend/" # Your production GitHub Pages URL
 ]
 
 
 connection_attempts = defaultdict(list)#dictionary of IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
-#http_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
 uploads = defaultdict(list) #uploads by ip address
 
 MAX_UPLOADS = 50 #max saved uploads per ip address
 MAX_UPLOAD_SIZE = 10_000_000
-#UPLOAD_DIR = "stl_uploads"
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
 CLEANUP_INTERVAL_SECONDS = 3600 #1 hour
 FILE_AGE_LIMIT_SECONDS = 24 * 3600
 MAX_VOXEL_CT = 64 * 64 * 64
 
-#os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(JSON_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -67,7 +63,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],   # update once deployed
+    allow_origins=["https://gruedisueli.github.io/Topo3D_Web_Frontend/"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,59 +125,8 @@ def can_connect(ip: str, max_attempts: int = 5, window_seconds: int= 60) -> bool
     connection_attempts[ip] = attempts
     return True
 
-# @app.post("/upload-stl")
-# async def upload_stl(request: Request, file: UploadFile = File(...)):
-#     #check last upload time and deny if too recent
-#     now = time.time()
-#     client_ip = request.client.host
-#     upload_history = http_timestamps[client_ip]
-#     if upload_history and now - upload_history[-1] < 10: #only allow one upload every 10 seconds
-#         m = "Too many requests. Try again later"
-#         logger.warning(f"{client_ip}: {m}")
-#         raise HTTPException(400, m)
-#     upload_history.append(now)
-
-#     if not file.filename.endswith('.stl'):
-#         m = "Invalid file type. Only .stl files are allowed"
-#         logger.warning(f"{client_ip}: {m}")
-#         raise HTTPException(400, m)
-    
-#     #chunked reading of file size (file.size is not a reliable measure as it is a claim by the client)
-#     contents = b''
-#     while chunk := await file.read(8192):
-#         contents += chunk
-#         if len(contents) > MAX_UPLOAD_SIZE:
-#             m = "File too large (max 10MB size)"
-#             logger.warning(f"{client_ip}: {m}")
-#             raise HTTPException(status_code=413, detail = m)
-    
-#     # #check header of STL (heuristic, optional for now)
-#     # if not (contents.startswith(b'solid') or len(contents)> 80):
-
-#     try:
-#         #generate unique ID and a secure temporary file path
-#         stl_id = str(uuid.uuid4())
-#         file_path = os.path.join(UPLOAD_DIR, f"{stl_id}.stl")
-
-#         #save file
-#         with open(file_path, "wb") as buffer:
-#             content = await file.read()
-#             buffer.write(content)
-#             #delete old uploads that exceed the number allowed
-#             if len(uploads[client_ip]) >= MAX_UPLOADS:
-#                 to_del = uploads[client_ip].pop(0)
-#                 if os.path.exists(to_del):
-#                     os.remove(to_del)
-#             uploads[client_ip].append(file_path)
-#             return JSONResponse(content={"stl_id" : stl_id})
-#     except Exception as e:
-#         m = "{client_ip}: Could not save file."
-#         logger.error(m)
-#         raise HTTPException(500, m)
-    
 #global state
 waiting_queue = asyncio.Queue()
-#active_futures = set()
 
 async def optimization_worker():
     """Background task that runs one optimization at a time."""
@@ -336,12 +281,6 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
-    # if o_p.invert_design_space:
-    #     arg_list.append("--invert-design-space")
-    # if o_p.design_space_stl_id is not None:
-    #     arg_list.append("--design-space-stl")
-    #     stl_path = os.path.join(UPLOAD_DIR, f"{o_p.design_space_stl_id}.stl")
-    #     arg_list.append(stl_path)
     obstacles_path = None
     supports_path = None
     forces_path = None
@@ -441,44 +380,3 @@ def quantize_density_field(density):
     """Converts the density field (shape: nely, nelx, nelz) (float32) to a row major order flat byte array for efficient transmission."""
     # convert to uint8 (0-255)
     return (density * 255).astype(np.uint8).tobytes()
-
-# html = """
-# <!DOCTYPE html>
-# <html>
-# <head><title>WebSocket Tester</title></head>
-# <body>
-#     <button id="connect">Connect & Start</button>
-#     <button id="stop" disabled>Stop</button>
-#     <pre id="log"></pre>
-#     <script>
-#         let ws = null;
-#         const log = msg => document.getElementById('log').innerText += msg + "\\n";
-
-#         document.getElementById('connect').onclick = () => {
-#             log("Connecting...");
-#             ws = new WebSocket("ws://localhost:8000/ws");
-#             ws.onopen = () => {
-#                 log("Connected");
-#                 const params = { nelx: 32, nely: 16, nelz: 8, volfrac: 0.3, penal: 3.0, rmin: 1.5, disp_thres: 0.1, maxloop: 100, gpu: true };
-#                 ws.send(JSON.stringify(params));
-#                 document.getElementById('stop').disabled = false;
-#             };
-#             ws.onmessage = (e) => {
-#                 if (typeof e.data === "string") log("JSON: " + e.data);
-#                 else log("Binary data received (" + e.data.size + " bytes)");
-#             };
-#             ws.onclose = () => log("Disconnected");
-#         };
-#         document.getElementById('stop').onclick = () => {
-#             if (ws && ws.readyState === WebSocket.OPEN) {
-#                 ws.send(JSON.stringify({ command: "stop" }));
-#                 log("Stop command sent");
-#             }
-#         };
-#     </script>
-# </body>
-# </html>
-# """
-# @app.get("/")
-# async def get():
-#     return HTMLResponse(html)
